@@ -357,7 +357,7 @@ class TestRlmQueryBatchedParallel:
             max_concurrent_subcalls=8,
             subcall_semaphore=threading.Semaphore(16),
         )
-        result = repl.execute_code("answers = rlm_query_batched(['only'])")
+        _ = repl.execute_code("answers = rlm_query_batched(['only'])")
         assert repl.locals["answers"] == ["single"]
         subcall_fn.assert_called_once_with("only", None)
         repl.cleanup()
