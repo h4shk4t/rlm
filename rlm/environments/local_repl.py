@@ -172,16 +172,12 @@ class LocalREPL(NonIsolatedEnv):
         subcall_semaphore: threading.Semaphore | None = None,
         **kwargs,
     ):
-        """
-        Args:
-            max_concurrent_subcalls: Max children to dispatch in parallel from
-                THIS REPL instance (controls local ThreadPoolExecutor size).
-                Default 1 = sequential (identical to previous behavior).
-            subcall_semaphore: Global semaphore bounding total concurrent child
-                RLMs across ALL depths. If None, uses the module-level default
-                (16 slots). Pass a custom one for testing or tighter control.
-        """
-        super().__init__(persistent=persistent, depth=depth, **kwargs)
+        super().__init__(
+            persistent=persistent,
+            depth=depth,
+            max_concurrent_subcalls=max_concurrent_subcalls,
+            **kwargs,
+        )
 
         self.lm_handler_address = lm_handler_address
         self.subcall_fn = subcall_fn  # Callback for recursive RLM calls (depth > 1 support)
@@ -363,8 +359,7 @@ class LocalREPL(NonIsolatedEnv):
         return self._llm_query(prompt, model)
 
     def _rlm_query_batched(self, prompts: list[str], model: str | None = None) -> list[str]:
-        """Spawn recursive RLM sub-calls for multiple prompts.
-
+        """Spawn recursive RLM sub-calls for multiple prompts in parallel.
         Each prompt gets its own child RLM for deeper thinking.
 
         Execution modes (controlled by max_concurrent_subcalls):
@@ -401,10 +396,25 @@ class LocalREPL(NonIsolatedEnv):
             for prompt in prompts:
                 try:
                     completion = self.subcall_fn(prompt, model)
-                    self._pending_llm_calls.append(completion)
-                    results.append(completion.response)
+                    with lock:
+                        completions.append((index, completion))
+                    results[index] = completion.response
                 except Exception as e:
-                    results.append(f"Error: RLM query failed - {e}")
+                    results[index] = f"Error: RLM query failed - {e}"
+
+            with ThreadPoolExecutor(max_workers=max_workers) as executor:
+                futures = [
+                    executor.submit(_run_subcall, i, prompt) for i, prompt in enumerate(prompts)
+                ]
+                # Wait for all futures to complete; exceptions are captured inside _run_subcall
+                for future in as_completed(futures):
+                    future.result()  # Re-raises unexpected executor errors
+
+            # Append completions in original prompt order for deterministic metadata
+            completions.sort(key=lambda x: x[0])
+            for _, completion in completions:
+                self._pending_llm_calls.append(completion)
+
             return results
 
         # Fall back to plain batched LM call if no recursive capability
