@@ -8,6 +8,7 @@ RLMChatCompletion.metadata. Optionally writes the same data to JSON-lines files.
 import json
 import os
 import uuid
+from collections.abc import Callable
 from datetime import datetime
 
 from rlm.core.types import RLMIteration, RLMMetadata
@@ -23,9 +24,15 @@ class RLMLogger:
     - log_dir="path": same capture plus appends to a JSONL file per run.
     """
 
-    def __init__(self, log_dir: str | None = None, file_name: str = "rlm"):
+    def __init__(
+        self,
+        log_dir: str | None = None,
+        file_name: str = "rlm",
+        event_sink: Callable[[dict], None] | None = None,
+    ):
         self._save_to_disk = log_dir is not None
         self.log_dir = log_dir
+        self.event_sink = event_sink
         self.log_file_path: str | None = None
         if self._save_to_disk and log_dir:
             os.makedirs(log_dir, exist_ok=True)
@@ -56,6 +63,15 @@ class RLMLogger:
                 json.dump(entry, f)
                 f.write("\n")
 
+        self._emit_event(
+            {
+                "event_type": "metadata",
+                "type": "metadata",
+                "timestamp": datetime.now().isoformat(),
+                **self._run_metadata,
+            }
+        )
+
     def log(self, iteration: RLMIteration) -> None:
         """Capture one iteration (and optionally append to file)."""
         self._iteration_count += 1
@@ -71,6 +87,13 @@ class RLMLogger:
             with open(self.log_file_path, "a") as f:
                 json.dump(entry, f)
                 f.write("\n")
+
+        self._emit_event(
+            {
+                "event_type": "iteration",
+                **entry,
+            }
+        )
 
     def clear_iterations(self) -> None:
         """Reset iterations for the next completion (trajectory is per completion)."""
@@ -89,3 +112,12 @@ class RLMLogger:
     @property
     def iteration_count(self) -> int:
         return self._iteration_count
+
+    def _emit_event(self, event: dict) -> None:
+        if self.event_sink is None:
+            return
+        try:
+            self.event_sink(event)
+        except Exception:
+            # Streaming/logging observers should never interfere with core execution.
+            pass

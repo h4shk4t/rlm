@@ -72,9 +72,9 @@ class RLM:
         compaction_threshold_pct: float = 0.85,
         max_concurrent_subcalls: int = 4,
         on_subcall_start: Callable[[int, str, str], None] | None = None,
-        on_subcall_complete: Callable[[int, str, float, str | None], None] | None = None,
+        on_subcall_complete: Callable[[int, str, float, str | None, str | None], None] | None = None,
         on_iteration_start: Callable[[int, int], None] | None = None,
-        on_iteration_complete: Callable[[int, int, float], None] | None = None,
+        on_iteration_complete: Callable[[int, int, float, str, int, str], None] | None = None,
     ):
         """
         Args:
@@ -106,9 +106,9 @@ class RLM:
             max_concurrent_subcalls: Maximum number of parallel threads for rlm_query_batched subcalls.
                 Each child RLM runs in its own thread. Default 4.
             on_subcall_start: Callback fired when a child RLM starts. Args: (depth, model, prompt_preview).
-            on_subcall_complete: Callback fired when a child RLM completes. Args: (depth, model, duration, error_or_none).
+            on_subcall_complete: Callback fired when a child RLM completes. Args: (depth, model, duration, error_or_none, response_preview_or_none).
             on_iteration_start: Callback fired when an iteration starts. Args: (depth, iteration_num).
-            on_iteration_complete: Callback fired when an iteration completes. Args: (depth, iteration_num, duration).
+            on_iteration_complete: Callback fired when an iteration completes. Args: (depth, iteration_num, duration, response, code_block_count, prompt_preview).
         """
         # Store config for spawning per-completion
         self.backend = backend
@@ -342,11 +342,37 @@ class RLM:
                         build_user_prompt(root_prompt, i, context_count, history_count)
                     ]
 
+                    if self.on_iteration_start:
+                        try:
+                            self.on_iteration_start(self.depth, i + 1)
+                        except Exception:
+                            pass
+
                     iteration: RLMIteration = self._completion_turn(
                         prompt=current_prompt,
                         lm_handler=lm_handler,
                         environment=environment,
                     )
+
+                    if self.on_iteration_complete:
+                        try:
+                            # Extract last user message as the prompt preview for this turn
+                            turn_input = ""
+                            if isinstance(iteration.prompt, list):
+                                for msg in reversed(iteration.prompt):
+                                    if isinstance(msg, dict) and msg.get("role") == "user":
+                                        turn_input = str(msg.get("content", ""))
+                                        break
+                            self.on_iteration_complete(
+                                self.depth,
+                                i + 1,
+                                iteration.iteration_time or 0.0,
+                                iteration.response or "",
+                                len(iteration.code_blocks),
+                                turn_input,
+                            )
+                        except Exception:
+                            pass
 
                     # Check error/budget/token limits after each iteration
                     self._check_iteration_limits(iteration, i, lm_handler)
@@ -747,6 +773,7 @@ class RLM:
 
         subcall_start = time.perf_counter()
         error_msg: str | None = None
+        response_preview: str | None = None
 
         # Spawn a child RLM with its own LocalREPL
         child = RLM(
@@ -765,7 +792,7 @@ class RLM:
             other_backends=self.other_backends,
             other_backend_kwargs=self.other_backend_kwargs,
             # Give child its own logger so its trajectory is captured in metadata
-            logger=RLMLogger() if self.logger else None,
+            logger=RLMLogger(event_sink=self.logger.event_sink) if self.logger else None,
             verbose=False,
             # Propagate custom tools to children (sub_tools become the child's tools)
             custom_tools=self.custom_sub_tools,
@@ -775,12 +802,16 @@ class RLM:
             # Propagate callbacks to children for nested tracking
             on_subcall_start=self.on_subcall_start,
             on_subcall_complete=self.on_subcall_complete,
+            on_iteration_start=self.on_iteration_start,
+            on_iteration_complete=self.on_iteration_complete,
         )
         try:
             result = child.completion(prompt, root_prompt=None)
             # Track child's cost in parent's cumulative cost
             if result.usage_summary and result.usage_summary.total_cost:
                 self._cumulative_cost += result.usage_summary.total_cost
+            if result.response:
+                response_preview = result.response[:2000]
             return result
         except BudgetExceededError as e:
             # Propagate child's spending to parent
@@ -809,7 +840,7 @@ class RLM:
             if self.on_subcall_complete:
                 try:
                     duration = time.perf_counter() - subcall_start
-                    self.on_subcall_complete(next_depth, str(resolved_model), duration, error_msg)
+                    self.on_subcall_complete(next_depth, str(resolved_model), duration, error_msg, response_preview)
                 except Exception:
                     pass  # Don't let callback errors break execution
 

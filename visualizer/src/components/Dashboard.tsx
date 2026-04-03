@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useCallback, useEffect } from 'react';
+import Link from 'next/link';
 import { Card, CardContent } from '@/components/ui/card';
 import { Badge } from '@/components/ui/badge';
 import { ScrollArea } from '@/components/ui/scroll-area';
@@ -122,6 +123,12 @@ export function Dashboard() {
                 </p>
               </div>
               <div className="flex items-center gap-4">
+                <Link
+                  href="/live"
+                  className="text-[10px] font-mono text-muted-foreground border border-border rounded px-2 py-1 hover:text-primary hover:border-primary/40 transition-colors"
+                >
+                  LIVE
+                </Link>
                 <ThemeToggle />
                 <div className="flex items-center gap-2 text-[10px] text-muted-foreground font-mono">
                   <span className="flex items-center gap-1.5">
