@@ -40,7 +40,12 @@ class AzureOpenAIClient(BaseLM):
             api_version = os.getenv("AZURE_OPENAI_API_VERSION", "2024-02-01")
 
         if azure_deployment is None:
-            azure_deployment = os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            # Fall back to model_name first, then to the ENV variable
+            azure_deployment = model_name or os.getenv("AZURE_OPENAI_DEPLOYMENT")
+            
+        # Ensure model_name is accurate to what we are actually hitting
+        # so telemetry / UI correctly reflects reality
+        model_name = model_name or azure_deployment
 
         if azure_endpoint is None:
             raise ValueError(
