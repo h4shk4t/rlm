@@ -161,3 +161,6 @@ You'll have the option to select saved `.jsonl` files
 <p align="center">
   <img src="media/visualizer.png" alt="RLM Visualizer Example" width="800"/>
 </p>
+
+### RLM Live Trajectory Stream
+In addition to exploring saved logs, the visualizer features a real-time **live streaming interface** (RLM DevTools) available at `http://localhost:3010/live`. You can launch the backend streaming server using `python -m rlm.streaming.server --host 127.0.0.1 --port 8765`, which allows you to run interactive prompt evaluations and see the exact reasoning traces streamed live into a depth-stratified component tree.
