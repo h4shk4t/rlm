@@ -358,7 +358,9 @@ class LocalREPL(NonIsolatedEnv):
         # Fall back to plain batched LM call if no recursive capability
         return self._llm_query_batched(prompts, model)
 
-    def _rlm_query_batched_parallel(self, prompts: list[str], model: str | None = None) -> list[str]:
+    def _rlm_query_batched_parallel(
+        self, prompts: list[str], model: str | None = None
+    ) -> list[str]:
         """Execute multiple RLM sub-calls in parallel using ThreadPoolExecutor."""
         results: list[str | None] = [None] * len(prompts)
         completions: list[tuple[int, RLMChatCompletion]] = []
